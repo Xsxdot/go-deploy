@@ -1,0 +1,26 @@
+serviceName: frontend-app
+ssl: true
+sslKeyPath: /opt/cert/your-domain.key
+sslCertPath: /opt/cert/your-domain.crt
+testEnv:
+  domain: frontend-test.yourdomain.com
+  installPath: /opt/frontend-test
+  frontendBuildCommands:
+    - "npm install"
+    - "npm run build:test"
+  servers:
+    - 192.168.1.101
+prodEnv:
+  domain: frontend.yourdomain.com
+  installPath: /opt/frontend
+  frontendBuildCommands:
+    - "npm install"
+    - "npm run build"
+  servers:
+    - 192.168.1.102
+frontendWorkDir: /path/to/your/frontend/project
+copyFiles:
+    - source: /path/to/your/frontend/project/dist/*
+      target: ${workDir}/
+      mode: move
+      type: front

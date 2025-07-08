@@ -1,0 +1,23 @@
+# Nginx服务器列表
+nginxServers:
+  - 192.168.1.100
+
+# Nginx配置文件目录
+nginxConfDir: /etc/nginx/conf.d
+
+# 服务器列表配置
+servers:
+  - host: 192.168.1.101
+    env: test
+  - host: 192.168.1.102
+    env: prod
+  - host: 192.168.1.103
+    env: prod
+  - host: 192.168.1.104
+    env: prod
+  - host: 192.168.1.105
+    env: prod
+
+# 阿里云DNS配置 (可选，如不使用DNS功能可以留空)
+dnsKey: "your-dns-access-key"
+dnsSecret: "your-dns-access-secret" 

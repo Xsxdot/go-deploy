@@ -1,0 +1,203 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            goos: linux
+            goarch: amd64
+          - os: linux
+            arch: arm64
+            goos: linux
+            goarch: arm64
+          - os: darwin
+            arch: amd64
+            goos: darwin
+            goarch: amd64
+          - os: darwin
+            arch: arm64
+            goos: darwin
+            goarch: arm64
+          - os: windows
+            arch: amd64
+            goos: windows
+            goarch: amd64
+          - os: windows
+            arch: arm64
+            goos: windows
+            goarch: arm64
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Get version
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Build binary
+      run: |
+        mkdir -p dist
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          env GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w -X main.version=${{ steps.get_version.outputs.VERSION }}" -o "dist/deploy-${{ matrix.os }}-${{ matrix.arch }}.exe" .
+        else
+          env GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w -X main.version=${{ steps.get_version.outputs.VERSION }}" -o "dist/deploy-${{ matrix.os }}-${{ matrix.arch }}" .
+        fi
+
+    - name: Create package
+      run: |
+        cd dist
+        mkdir -p deploy-${{ matrix.os }}-${{ matrix.arch }}
+        
+        # 复制二进制文件
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          cp deploy-${{ matrix.os }}-${{ matrix.arch }}.exe deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        else
+          cp deploy-${{ matrix.os }}-${{ matrix.arch }} deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        fi
+        
+        # 复制配置文件和文档
+        cp -r ../conf/ deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        cp -r ../services/ deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        cp ../README.md deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        cp ../QUICK_START.md deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        cp ../LICENSE deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        
+        # 创建压缩包
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          zip -r deploy-${{ steps.get_version.outputs.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}.zip deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        else
+          tar -czf deploy-${{ steps.get_version.outputs.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        fi
+        
+        # 清理临时目录
+        rm -rf deploy-${{ matrix.os }}-${{ matrix.arch }}/
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: deploy-${{ matrix.os }}-${{ matrix.arch }}
+        path: |
+          dist/*.tar.gz
+          dist/*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        
+    - name: Organize artifacts
+      run: |
+        mkdir -p dist
+        find artifacts -name "*.tar.gz" -o -name "*.zip" | xargs -I {} cp {} dist/
+        
+    - name: Generate checksums
+      run: |
+        cd dist
+        if command -v sha256sum &> /dev/null; then
+          sha256sum *.tar.gz *.zip > checksums.txt
+        else
+          shasum -a 256 *.tar.gz *.zip > checksums.txt
+        fi
+        
+    - name: Get version
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Generate release notes
+      run: |
+        cat > release-notes.md << 'EOF'
+        # Release ${{ steps.get_version.outputs.VERSION }}
+
+        ## 🚀 新增功能
+
+        - 自动化部署工具
+        - 支持前后端应用部署
+        - 多环境管理（测试/生产）
+        - 版本回滚功能
+        - 自动化Nginx配置
+        - DNS记录管理
+        - 服务健康检查
+
+        ## 📦 下载
+
+        选择适合你系统的版本下载：
+
+        EOF
+        
+        # 添加下载链接
+        for file in dist/*.tar.gz dist/*.zip; do
+          if [ -f "$file" ]; then
+            filename=$(basename "$file")
+            echo "- [$filename](https://github.com/xsxdot/go-deploy/releases/download/${{ steps.get_version.outputs.VERSION }}/$filename)" >> release-notes.md
+          fi
+        done
+        
+        cat >> release-notes.md << 'EOF'
+
+        ## 🔧 安装方法
+
+        ### Linux/macOS
+        ```bash
+        # 下载并解压
+        wget https://github.com/xsxdot/go-deploy/releases/download/${{ steps.get_version.outputs.VERSION }}/deploy-${{ steps.get_version.outputs.VERSION }}-linux-amd64.tar.gz
+        tar -xzf deploy-${{ steps.get_version.outputs.VERSION }}-linux-amd64.tar.gz
+        cd deploy-linux-amd64
+
+        # 配置并运行
+        cp conf/conf.yaml.example conf/conf.yaml
+        cp services/factory.yaml.example services/my-app.yaml
+        # 编辑配置文件...
+        ./deploy
+        ```
+
+        ### Windows
+        1. 下载 `deploy-${{ steps.get_version.outputs.VERSION }}-windows-amd64.zip`
+        2. 解压到目标目录
+        3. 复制并编辑配置文件
+        4. 双击运行 `deploy.exe`
+
+        ## 📋 校验和
+
+        ```
+        EOF
+        
+        cat dist/checksums.txt >> release-notes.md
+        echo '```' >> release-notes.md
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.get_version.outputs.VERSION }}
+        name: Release ${{ steps.get_version.outputs.VERSION }}
+        body_path: release-notes.md
+        files: |
+          dist/*.tar.gz
+          dist/*.zip
+          dist/checksums.txt
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
