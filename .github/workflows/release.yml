@@ -60,31 +60,37 @@ jobs:
     - name: Create package
       run: |
         cd dist
-        mkdir -p deploy-${{ matrix.os }}-${{ matrix.arch }}
+        pkg_dir="package-${{ matrix.os }}-${{ matrix.arch }}"
+        final_dir="deploy-${{ matrix.os }}-${{ matrix.arch }}"
+        mkdir -p "$pkg_dir/$final_dir"
         
         # 复制二进制文件
         if [ "${{ matrix.goos }}" = "windows" ]; then
-          cp deploy-${{ matrix.os }}-${{ matrix.arch }}.exe deploy-${{ matrix.os }}-${{ matrix.arch }}/
+          cp deploy-${{ matrix.os }}-${{ matrix.arch }}.exe "$pkg_dir/$final_dir/"
+          # 重命名为统一的可执行文件名
+          mv "$pkg_dir/$final_dir/deploy-${{ matrix.os }}-${{ matrix.arch }}.exe" "$pkg_dir/$final_dir/deploy.exe"
         else
-          cp deploy-${{ matrix.os }}-${{ matrix.arch }} deploy-${{ matrix.os }}-${{ matrix.arch }}/
+          cp deploy-${{ matrix.os }}-${{ matrix.arch }} "$pkg_dir/$final_dir/"
+          # 重命名为统一的可执行文件名
+          mv "$pkg_dir/$final_dir/deploy-${{ matrix.os }}-${{ matrix.arch }}" "$pkg_dir/$final_dir/deploy"
         fi
         
-        # 复制配置文件和文档
-        cp -r ../conf/ deploy-${{ matrix.os }}-${{ matrix.arch }}/
-        cp -r ../services/ deploy-${{ matrix.os }}-${{ matrix.arch }}/
-        cp ../README.md deploy-${{ matrix.os }}-${{ matrix.arch }}/
-        cp ../QUICK_START.md deploy-${{ matrix.os }}-${{ matrix.arch }}/
-        cp ../LICENSE deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        # 复制配置文件和文档（只复制示例文件）
+        cp -r ../conf/ "$pkg_dir/$final_dir/"
+        cp -r ../services/ "$pkg_dir/$final_dir/"
+        cp ../README.md "$pkg_dir/$final_dir/"
+        cp ../QUICK_START.md "$pkg_dir/$final_dir/"
+        cp ../LICENSE "$pkg_dir/$final_dir/"
         
         # 创建压缩包
         if [ "${{ matrix.goos }}" = "windows" ]; then
-          zip -r deploy-${{ steps.get_version.outputs.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}.zip deploy-${{ matrix.os }}-${{ matrix.arch }}/
+          zip -r deploy-${{ steps.get_version.outputs.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}.zip "$pkg_dir/$final_dir/"
         else
-          tar -czf deploy-${{ steps.get_version.outputs.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz deploy-${{ matrix.os }}-${{ matrix.arch }}/
+          tar -czf deploy-${{ steps.get_version.outputs.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz "$pkg_dir/$final_dir/"
         fi
         
         # 清理临时目录
-        rm -rf deploy-${{ matrix.os }}-${{ matrix.arch }}/
+        rm -rf "$pkg_dir"
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4

@@ -109,29 +109,34 @@ create_package() {
     print_info "创建 ${os}/${arch} 发布包..."
     
     # 创建临时目录
-    pkg_dir="dist/deploy-${os}-${arch}"
-    mkdir -p "$pkg_dir"
+    pkg_dir="dist/package-${os}-${arch}"
+    final_dir="deploy-${os}-${arch}"
+    mkdir -p "$pkg_dir/$final_dir"
     
     # 复制二进制文件
     if [ "$os" = "windows" ]; then
-        cp "dist/${binary_name}.exe" "$pkg_dir/"
+        cp "dist/${binary_name}.exe" "$pkg_dir/$final_dir/"
+        # 重命名为统一的可执行文件名
+        mv "$pkg_dir/$final_dir/${binary_name}.exe" "$pkg_dir/$final_dir/deploy.exe"
     else
-        cp "dist/${binary_name}" "$pkg_dir/"
+        cp "dist/${binary_name}" "$pkg_dir/$final_dir/"
+        # 重命名为统一的可执行文件名
+        mv "$pkg_dir/$final_dir/${binary_name}" "$pkg_dir/$final_dir/deploy"
     fi
     
-    # 复制配置文件和文档
-    cp -r conf/ "$pkg_dir/"
-    cp -r services/ "$pkg_dir/"
-    cp README.md "$pkg_dir/"
-    cp QUICK_START.md "$pkg_dir/"
-    cp LICENSE "$pkg_dir/"
+    # 复制配置文件和文档（只复制示例文件）
+    cp -r conf/ "$pkg_dir/$final_dir/"
+    cp -r services/ "$pkg_dir/$final_dir/"
+    cp README.md "$pkg_dir/$final_dir/"
+    cp QUICK_START.md "$pkg_dir/$final_dir/"
+    cp LICENSE "$pkg_dir/$final_dir/"
     
     # 创建压缩包
     cd dist/
     if [ "$os" = "windows" ]; then
-        zip -r "deploy-${VERSION}-${os}-${arch}.zip" "deploy-${os}-${arch}/"
+        zip -r "deploy-${VERSION}-${os}-${arch}.zip" "package-${os}-${arch}/$final_dir/"
     else
-        tar -czf "deploy-${VERSION}-${os}-${arch}.tar.gz" "deploy-${os}-${arch}/"
+        tar -czf "deploy-${VERSION}-${os}-${arch}.tar.gz" "package-${os}-${arch}/$final_dir/"
     fi
     cd ..
     
