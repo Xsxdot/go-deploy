@@ -1,0 +1,754 @@
+# =============================================================================
+# DeployFlow Pipeline 完整示例
+# =============================================================================
+# 本文件展示了 DeployFlow 部署流水线系统的所有功能和配置选项
+# 包含：多种插件类型、DAG依赖、并发控制、容错机制、模板引用等
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 一、基础设施配置 (infra.yaml)
+# -----------------------------------------------------------------------------
+# 以下内容通常放在独立的 infra.yaml 文件中
+# 这里展示完整的基础设施配置结构
+
+# providers: 定义外部服务提供商的认证配置
+# 敏感凭据请使用 ${env.VAR_NAME} 语法，仅在运行时从环境变量读取，不落盘到 SQLite
+providers:
+  # DNS 服务提供商配置
+  dns:
+    # 阿里云 DNS
+    aliyun:
+      type: aliyun
+      accessKey: "${env.ALIYUN_ACCESS_KEY}"      # 安全：运行时 os.Getenv，配置快照仅存占位符
+      accessSecret: "${env.ALIYUN_ACCESS_SECRET}"
+      region: "cn-hangzhou"
+
+    # Cloudflare DNS
+    cloudflare:
+      type: cloudflare
+      apiToken: "${env.CLOUDFLARE_API_TOKEN}"
+      zoneId: "your-zone-id"
+      proxied: false                           # 是否开启代理
+
+  # 对象存储提供商（示例扩展）
+  oss:
+    aliyun_oss:
+      type: aliyun_oss
+      accessKey: "${env.ALIYUN_ACCESS_KEY}"
+      accessSecret: "${env.ALIYUN_ACCESS_SECRET}"
+      endpoint: "oss-cn-hangzhou.aliyuncs.com"
+      bucket: "my-app-releases"
+
+# globalVars: 全局变量，可被所有 pipeline 引用
+globalVars:
+  app_name: "my-awesome-app"
+  app_port: 8080
+  region: "cn-hangzhou"
+  repo_url: "https://github.com/myorg/myapp"
+  docker_registry: "registry.example.com"
+  health_check_path: "/health"
+  health_check_port: 8080
+
+# resources: 异构资源池（主机、K8s集群等）
+resources:
+  # 堡垒机/跳板机（生产环境常见：计算节点无公网 IP，需经堡垒机转发）
+  "jump-server":
+    addr: "203.0.113.10"              # 堡垒机公网地址
+    user: "root"
+    auth:
+      keyPath: "~/.ssh/id_rsa"
+
+  # 物理机/虚拟机资源
+  "web-01":
+    addr: "192.168.1.10"              # 主机地址（必填）
+    lanAddr: "10.0.0.10"              # 内网地址（可选，用于内网通信）
+    publicAddr: "203.0.113.10"        # 公网地址（可选）
+    user: "deploy"                    # SSH 用户
+    bastion: "jump-server"            # 经由堡垒机跳转（内网节点必填）
+    auth:
+      keyPath: "~/.ssh/id_rsa"        # SSH 私钥路径
+      # password: "secret"            # 或使用密码认证
+    proxy: "socks5://proxy.internal:1080"  # SOCKS5 代理（可选，与 bastion 二选一）
+    hasNginx: true                    # 是否安装 Nginx
+    nginxConfPath: "/etc/nginx/conf.d"
+
+  "web-02":
+    addr: "192.168.1.11"
+    lanAddr: "10.0.0.11"
+    user: "deploy"
+    bastion: "jump-server"
+    auth:
+      keyPath: "~/.ssh/id_rsa"
+    hasNginx: true
+    nginxConfPath: "/etc/nginx/conf.d"
+
+  "web-03":
+    addr: "192.168.1.12"
+    lanAddr: "10.0.0.12"
+    user: "deploy"
+    bastion: "jump-server"
+    auth:
+      keyPath: "~/.ssh/id_rsa"
+
+  "gateway-01":
+    addr: "192.168.1.100"
+    lanAddr: "10.0.0.100"
+    user: "deploy"
+    bastion: "jump-server"
+    auth:
+      keyPath: "~/.ssh/id_rsa"
+    hasNginx: true
+    nginxConfPath: "/etc/nginx/conf.d"
+
+  "gateway-02":
+    addr: "192.168.1.101"
+    lanAddr: "10.0.0.101"
+    user: "deploy"
+    bastion: "jump-server"
+    auth:
+      keyPath: "~/.ssh/id_rsa"
+    hasNginx: true
+    nginxConfPath: "/etc/nginx/conf.d"
+
+  # Kubernetes 集群资源（示例）
+  # "k8s-prod":
+  #   context: "prod-cluster"
+  #   namespace: "my-app"
+
+# roles: 角色分组，将资源按功能分组
+roles:
+  compute: ["web-01", "web-02", "web-03"]      # 应用服务器组
+  gateway: ["gateway-01", "gateway-02"]        # 网关服务器组
+  canary: ["web-03"]                            # 金丝雀发布组
+  all: ["web-01", "web-02", "web-03", "gateway-01", "gateway-02"]
+
+# =============================================================================
+# 二、Pipeline 配置 (pipeline.yaml)
+# =============================================================================
+
+name: "my-awesome-app-production"   # 流水线名称
+env: "production"                   # 环境标识: development/staging/production
+roles: ["compute", "gateway"]       # 全局默认角色（可被 step 级别覆盖）
+
+# variables: 流水线级别变量
+variables:
+  version: ""                        # 将在运行时注入，由 --bump 自动生成
+  release_dir: "/opt/${app_name}/releases"
+  current_dir: "/opt/${app_name}/current"
+  backup_dir: "/opt/${app_name}/backups"
+  log_dir: "/var/log/${app_name}"
+
+# =============================================================================
+# Pipeline Steps 定义
+# =============================================================================
+pipeline:
+  steps:
+    # =========================================================================
+    # 阶段一：构建与打包
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # 1.1 本地命令 - 代码构建
+    # -------------------------------------------------------------------------
+    - name: "Build Application"
+      type: local_command
+      roles: []                       # 空数组表示本地执行，不涉及远程主机
+      with:
+        # cmd: 要执行的命令（必填）
+        cmd: |
+          set -e
+          echo "Building ${app_name} version ${version}..."
+          cd src
+          go mod download
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../bin/app main.go
+          echo "Build completed successfully"
+        # workDir: 工作目录（可选）
+        workDir: "."
+        # env: 环境变量（可选）
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        # rollbackCmd: 回滚时执行的命令（可选）
+        rollbackCmd: "rm -rf bin/"
+
+    # -------------------------------------------------------------------------
+    # 1.2 本地命令 - 运行测试
+    # -------------------------------------------------------------------------
+    - name: "Run Tests"
+      type: local_command
+      roles: []
+      needs: ["Build Application"]    # 依赖：等待构建完成后执行
+      with:
+        cmd: |
+          cd src
+          go test -v -race -coverprofile=coverage.out ./...
+          go tool cover -html=coverage.out -o ../coverage.html
+        workDir: "."
+        rollbackCmd: "rm -f coverage.html coverage.out"
+
+    # -------------------------------------------------------------------------
+    # 1.3 本地打包 - 创建发布包
+    # -------------------------------------------------------------------------
+    - name: "Create Release Archive"
+      type: archive
+      roles: []
+      needs: ["Run Tests"]
+      with:
+        # source: 要打包的源目录（必填）
+        source: "./bin"
+        # dest: 输出目录（可选，默认当前目录）
+        dest: "./dist"
+        # format: 压缩格式 - tar.gz 或 zip（可选，默认 tar.gz）
+        format: "tar.gz"
+        # basename: 文件名基础部分（可选）
+        basename: "${app_name}-${version}"
+
+    # =========================================================================
+    # 阶段二：部署前准备
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # 2.1 人工审批 - 生产环境确认
+    # -------------------------------------------------------------------------
+    - name: "Production Approval"
+      type: manual_approval
+      roles: []
+      needs: ["Create Release Archive"]
+      with:
+        # message: 审批提示信息
+        message: |
+          ====================================
+          准备部署到生产环境
+          应用: ${app_name}
+          版本: ${version}
+          环境: ${env}
+          ====================================
+          确认继续部署？
+        # timeout: 审批超时时间（可选，默认 30m）
+        timeout: "60m"
+      # 注意：可通过环境变量 DEPLOYFLOW_APPROVE=yes 自动通过
+
+    # -------------------------------------------------------------------------
+    # 2.2 远程命令 - 创建发布目录
+    # -------------------------------------------------------------------------
+    - name: "Prepare Release Directory"
+      type: remote_command
+      roles: ["compute"]
+      needs: ["Production Approval"]
+      with:
+        cmd: |
+          mkdir -p ${release_dir}/${version}
+          mkdir -p ${backup_dir}
+          mkdir -p ${log_dir}
+        # timeout: 命令超时时间（可选）
+        timeout: "30s"
+
+    # -------------------------------------------------------------------------
+    # 2.3 文件传输 - 上传发布包
+    # -------------------------------------------------------------------------
+    - name: "Upload Release Package"
+      type: transfer
+      roles: ["compute"]
+      needs: ["Prepare Release Directory"]
+      # batch_size: 批量并发数（可选，默认全并发）
+      batch_size: 2
+      with:
+        # source: 本地源路径（必填）
+        source: "./dist/${app_name}-${version}.tar.gz"
+        # target: 远程目标路径（必填）
+        target: "${release_dir}/${version}/"
+        # compress: 是否压缩传输（可选）
+        compress: true
+        # chown: 文件所有者（可选）
+        chown: "deploy:deploy"
+        # chmod: 文件权限（可选）
+        chmod: "0644"
+
+    # -------------------------------------------------------------------------
+    # 2.4 远程命令 - 解压发布包
+    # -------------------------------------------------------------------------
+    - name: "Extract Release Package"
+      type: remote_command
+      roles: ["compute"]
+      needs: ["Upload Release Package"]
+      with:
+        cmd: |
+          cd ${release_dir}/${version}
+          tar -xzf ${app_name}-${version}.tar.gz
+          rm -f ${app_name}-${version}.tar.gz
+          chmod +x app
+        timeout: "60s"
+
+    # =========================================================================
+    # 阶段三：备份与切换
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # 3.1 远程备份 - 备份当前版本
+    # -------------------------------------------------------------------------
+    - name: "Backup Current Version"
+      type: backup_state
+      roles: ["compute"]
+      needs: ["Extract Release Package"]
+      with:
+        # target_path: 要备份的路径（必填）
+        target_path: "${current_dir}"
+        # backup_dir: 备份存储目录（必填）
+        backup_dir: "${backup_dir}"
+        # keep: 保留备份数量（可选，默认 10）
+        keep: 10
+
+    # -------------------------------------------------------------------------
+    # 3.2 软链接切换 - 原子切换版本
+    # -------------------------------------------------------------------------
+    - name: "Switch to New Version"
+      type: symlink_switch
+      roles: ["compute"]
+      needs: ["Backup Current Version"]
+      # 并发控制：每批 1 台，逐台切换
+      batch_size: 1
+      # 重试机制
+      retries: 3
+      retry_delay: "5s"
+      with:
+        # target_dir: 新版本目标目录（必填）
+        target_dir: "${release_dir}/${version}"
+        # link_path: 软链接路径（必填）
+        link_path: "${current_dir}"
+
+    # =========================================================================
+    # 阶段四：服务启动与健康检查
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # 4.1 Systemd 服务配置 - 下发 unit 文件并启动（Day 1 初始化 + Day 2 更新）
+    # -------------------------------------------------------------------------
+    # 支持 template 或 inline_template，模板渲染后写入 /etc/systemd/system/
+    # 自动执行 daemon-reload、enable、restart
+    - name: "Configure Systemd Service"
+      type: systemd_service
+      roles: ["compute"]
+      needs: ["Switch to New Version"]
+      batch_size: 1
+      with:
+        # name: 服务名，自动补全 .service 后缀
+        name: "${app_name}"
+        # template: 本地模板文件路径
+        template: "./templates/systemd.app.tmpl"
+        # params: 注入模板的变量（支持 ${var} 渲染）
+        params:
+          description: "${app_name} Backend Service"
+          exec_start: "${current_dir}/app"
+          working_directory: "${current_dir}"
+          user: "deploy"
+        # 控制指令（默认均为 true）
+        daemon_reload: true
+        enable: true
+        restart: true
+
+    # -------------------------------------------------------------------------
+    # 4.2 Systemd 服务检查
+    # -------------------------------------------------------------------------
+    - name: "Verify Service Status"
+      type: systemd_check
+      roles: ["compute"]
+      needs: ["Configure Systemd Service"]
+      with:
+        # unit: systemd 单元名称（必填）
+        unit: "${app_name}.service"
+        # expected_state: 期望状态（可选，默认 active）
+        expected_state: "active"
+        # max_retries: 最大重试次数（可选，默认 10）
+        max_retries: 10
+        # interval: 检查间隔（可选，默认 5s）
+        interval: "3s"
+        # status_log_lines: 失败时显示的日志行数（可选，默认 20）
+        status_log_lines: 50
+
+    # -------------------------------------------------------------------------
+    # 4.4 HTTP 健康检查
+    # -------------------------------------------------------------------------
+    - name: "Health Check"
+      type: http_check
+      roles: ["compute"]
+      needs: ["Verify Service Status"]
+      # 容忍度：允许 5% 的节点失败
+      tolerate_failures: "5%"
+      with:
+        # url: 健康检查 URL（必填）
+        # 支持内置变量：${host}, ${host.addr}, ${host.lanAddr}, ${host.publicAddr}
+        url: "http://${host.lanAddr}:${health_check_port}${health_check_path}"
+        # expected_status: 期望的 HTTP 状态码（可选，默认 200）
+        expected_status: 200
+        # expected_body: 期望的响应体（可选，支持正则）
+        expected_body: "ok|healthy"
+        # max_retries: 最大重试次数
+        max_retries: 20
+        # interval: 检查间隔
+        interval: "5s"
+        # timeout: 请求超时时间
+        timeout: "10s"
+
+    # -------------------------------------------------------------------------
+    # 4.5 Docker 容器检查（示例）
+    # -------------------------------------------------------------------------
+    # - name: "Verify Docker Container"
+    #   type: docker_check
+    #   roles: ["compute"]
+    #   needs: ["Health Check"]
+    #   with:
+    #     # container: 容器名称或 ID（必填）
+    #     container: "${app_name}"
+    #     # max_retries: 最大重试次数
+    #     max_retries: 10
+    #     # interval: 检查间隔
+    #     interval: "5s"
+    #     # log_tail: 失败时显示的日志行数
+    #     log_tail: 100
+
+    # =========================================================================
+    # 阶段五：网关配置更新
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # 5.1 Nginx 配置更新
+    # -------------------------------------------------------------------------
+    - name: "Update Nginx Config"
+      type: nginx_config
+      roles: ["gateway"]
+      needs: ["Health Check"]
+      with:
+        # template: Nginx 配置模板路径（必填）
+        template: "./templates/nginx.upstream.tmpl"
+        # upstream_roles: 上游服务器角色组（必填）
+        upstream_roles: ["compute"]
+        # params: 模板参数（可选）
+        params:
+          domain: "api.example.com"
+          filename: "api.upstream.conf"
+          ssl_certificate: "/etc/nginx/ssl/api.example.com.crt"
+          ssl_certificate_key: "/etc/nginx/ssl/api.example.com.key"
+        # backup: 是否备份原配置（可选，默认 true）
+        backup: true
+        # reload: 是否重载 Nginx（可选，默认 true）
+        reload: true
+
+    # -------------------------------------------------------------------------
+    # 5.2 Nginx 健康检查
+    # -------------------------------------------------------------------------
+    - name: "Verify Nginx Health"
+      type: http_check
+      roles: ["gateway"]
+      needs: ["Update Nginx Config"]
+      with:
+        url: "http://${host.lanAddr}/nginx_status"
+        expected_status: 200
+        max_retries: 5
+        interval: "2s"
+
+    # =========================================================================
+    # 阶段六：DNS 更新
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # 6.1 更新 DNS 记录
+    # -------------------------------------------------------------------------
+    - name: "Update DNS Records"
+      type: dns_record
+      roles: []
+      needs: ["Verify Nginx Health"]
+      with:
+        # provider: DNS 提供商（必填，在 infra.yaml 中配置）
+        provider: "aliyun"
+        # domain: 域名（必填）
+        domain: "api.example.com"
+        # record_type: 记录类型（可选，默认 A）
+        record_type: "A"
+        # ttl: TTL 秒数（可选）
+        ttl: 60
+        # target_roles: 目标 IP 的角色组（A 记录时必填）
+        target_roles: ["gateway"]
+        # mode: 模式 - create/update/upsert（可选，默认 update）
+        mode: "upsert"
+      # DNS 有缓存，回滚效果有限
+      # retries: 1
+      # retry_delay: "10s"
+
+    # =========================================================================
+    # 阶段七：清理与通知
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # 7.1 清理旧版本
+    # -------------------------------------------------------------------------
+    - name: "Cleanup Old Releases"
+      type: release_pruner
+      roles: ["compute"]
+      needs: ["Update DNS Records"]
+      with:
+        # versions_dir: 版本目录（必填）
+        versions_dir: "${release_dir}"
+        # keep: 保留的版本数量（必填）
+        keep: 5
+        # link_path: 当前软链接路径（可选，用于排除当前版本）
+        link_path: "${current_dir}"
+
+    # -------------------------------------------------------------------------
+    # 7.2 本地命令 - 部署完成通知
+    # -------------------------------------------------------------------------
+    - name: "Send Deployment Notification"
+      type: local_command
+      roles: []
+      needs: ["Cleanup Old Releases"]
+      with:
+        cmd: |
+          echo "====================================="
+          echo "部署完成!"
+          echo "应用: ${app_name}"
+          echo "版本: ${version}"
+          echo "环境: ${env}"
+          echo "时间: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "====================================="
+          # 可以集成 Slack/钉钉/企业微信等通知
+          # curl -X POST "${WEBHOOK_URL}" -d "{\"text\": \"Deployed ${app_name} ${version} to ${env}\"}"
+        workDir: "."
+
+# =============================================================================
+# 三、模板引用示例 (include)
+# =============================================================================
+# 使用 include 可以引用预定义的模板，实现流水线复用
+
+# ---
+# name: "canary-deployment"
+# env: "production"
+# variables:
+#   version: ""
+#
+# pipeline:
+#   steps:
+#     # ... 构建步骤 ...
+#
+#     # 引用金丝雀发布模板
+#     - name: "Canary Deployment"
+#       type: include
+#       needs: ["Create Release Archive"]
+#       with:
+#         # template: 模板文件路径
+#         template: "templates/canary-release.yaml"
+#         # vars: 传递给模板的变量
+#         vars:
+#           target_group: "canary"
+#           app_name: "${app_name}"
+#           version: "${version}"
+#
+#     # ... 后续步骤 ...
+
+# =============================================================================
+# 四、金丝雀发布模板示例 (templates/canary-release.yaml)
+# =============================================================================
+# 模板文件可以定义可复用的步骤序列
+
+# ---
+# steps:
+#   - name: "Deploy to Canary"
+#     type: remote_command
+#     roles: ["${vars.target_group}"]
+#     with:
+#       cmd: "echo deploying to ${vars.target_group}"
+#
+#   - name: "Verify Canary"
+#     type: http_check
+#     roles: ["${vars.target_group}"]
+#     needs: ["Deploy to Canary"]
+#     with:
+#       url: "http://${host.lanAddr}:8080/health"
+#       expected_status: 200
+#       max_retries: 10
+#
+#   - name: "Traffic Shift"
+#     type: nginx_config
+#     roles: ["gateway"]
+#     needs: ["Verify Canary"]
+#     with:
+#       template: "./templates/nginx.canary.tmpl"
+#       upstream_roles: ["${vars.target_group}"]
+#       params:
+#         traffic_percent: "20"
+
+# =============================================================================
+# 五、完整配置字段参考
+# =============================================================================
+#
+# Step 字段说明:
+# ----------------
+# name              string           步骤名称（唯一标识，必填）
+# type              string           插件类型（必填）
+# needs             []string         依赖的前置步骤名称（可选）
+# roles             []string         目标角色组（可选，默认使用全局 roles）
+# batch_size        int              并发批次大小（可选，默认全并发）
+# retries           int              失败重试次数（可选，默认 0）
+# retry_delay       string           重试间隔，如 "5s"、"1m"（可选）
+# tolerate_failures string           容忍度："5%" 或 "2"（可选）
+# with              map[string]any   插件参数（根据插件类型不同）
+#
+# 变量优先级:
+# ----------
+# 环境变量 > variables > globalVars
+#
+# 内置变量:
+# --------
+# ${version}        自动生成的版本号
+# ${run_temp_dir}   引擎分配的隔离临时沙箱目录（每次 Run 唯一，执行结束后自动清理，适合组装产物、打包等）
+# ${host}           当前主机路由 IP（优先 lanAddr）
+# ${host.addr}      主机地址
+# ${host.lanAddr}   主机内网地址
+# ${host.publicAddr} 主机公网地址
+# ${vars.xxx}       include 模板传入的变量
+# ${env.VAR_NAME}   运行时从 os.Getenv 读取，敏感凭据专用，不落盘到 SQLite
+#
+# 插件类型汇总:
+# ------------
+# local_command     本地 Shell 命令执行
+# remote_command    远程 SSH 命令执行
+# transfer          文件传输（SFTP）
+# archive           本地打包（tar.gz/zip）
+# http_check        HTTP 健康检查探针
+# systemd_check     Systemd 服务状态检查
+# systemd_service   Systemd 服务配置下发（模板渲染、daemon-reload、enable、restart）
+# docker_check      Docker 容器状态检查
+# manual_approval   人工确认阀门
+# symlink_switch    软链接原子切换
+# release_pruner    版本目录清理
+# backup_state      远程备份
+# dns_record        DNS 记录管理
+# nginx_config      Nginx 配置下发
+# include           模板引用
+#
+# CLI 命令:
+# --------
+# deploy release -n <project> -f pipeline.yaml -i infra.yaml --bump patch
+# deploy apply <project> [-v <version>] [--dry-run]   # --dry-run 预检模式，不执行真实 SSH
+# deploy rollback <project> -v <version>
+#
+# 环境变量:
+# --------
+# DEPLOYFLOW_APPROVE=yes    自动通过人工审批
+# ALIYUN_ACCESS_KEY          阿里云 AccessKey（配合 ${env.ALIYUN_ACCESS_KEY} 使用）
+# ALIYUN_ACCESS_SECRET       阿里云 AccessSecret
+# CLOUDFLARE_API_TOKEN       Cloudflare API Token
+
+# =============================================================================
+# 六、最小化配置示例
+# =============================================================================
+# 如果只需要最基础的部署流程，可以简化为：
+
+# ---
+# name: "simple-app"
+# env: "production"
+#
+# pipeline:
+#   steps:
+#     - name: "Build"
+#       type: local_command
+#       roles: []
+#       with:
+#         cmd: "go build -o bin/app"
+#
+#     - name: "Deploy"
+#       type: transfer
+#       roles: ["compute"]
+#       needs: ["Build"]
+#       with:
+#         source: "./bin/app"
+#         target: "/opt/app/app"
+#
+#     - name: "Restart"
+#       type: remote_command
+#       roles: ["compute"]
+#       needs: ["Deploy"]
+#       with:
+#         cmd: "systemctl restart myapp"
+#
+#     - name: "Health Check"
+#       type: http_check
+#       roles: ["compute"]
+#       needs: ["Restart"]
+#       with:
+#         url: "http://${host.lanAddr}:8080/health"
+#         expected_status: 200
+
+# =============================================================================
+# 六.5 混合构建示例（使用 run_temp_dir）
+# =============================================================================
+# 当需要从多个构建产物（如 Vue 前端 + Go 后端）组装再打包时，使用引擎提供的
+# ${run_temp_dir} 可避免硬编码路径与并发部署时的目录冲突，引擎会在 Run 结束时自动清理。
+#
+# ---
+# name: "hybrid-app"
+# env: "production"
+# pipeline:
+#   steps:
+#     - name: "Build Frontend"
+#       type: local_command
+#       roles: []
+#       with:
+#         cmd: "cd vue && npm run build"
+#     - name: "Build Backend"
+#       type: local_command
+#       roles: []
+#       with:
+#         cmd: "go build -o go/bin/server ./go"
+#     - name: "Assemble Artifacts"
+#       type: local_command
+#       needs: ["Build Frontend", "Build Backend"]
+#       roles: []
+#       with:
+#         cmd: |
+#           mkdir -p ${run_temp_dir}/web
+#           cp -r ./vue/dist/* ${run_temp_dir}/web/
+#           cp ./go/bin/server ${run_temp_dir}/
+#           echo '{"version": "${version}"}' > ${run_temp_dir}/manifest.json
+#     - name: "Package Release"
+#       type: archive
+#       needs: ["Assemble Artifacts"]
+#       roles: []
+#       with:
+#         source: "${run_temp_dir}"
+#         format: "tar.gz"
+#         basename: "${app_name}-${version}"
+
+# =============================================================================
+# 七、多环境配置示例
+# =============================================================================
+# 建议为不同环境创建不同的配置文件：
+#
+# ├── pipelines/
+# │   ├── pipeline.dev.yaml
+# │   ├── pipeline.staging.yaml
+# │   └── pipeline.prod.yaml
+# ├── infra/
+# │   ├── infra.dev.yaml
+# │   ├── infra.staging.yaml
+# │   └── infra.prod.yaml
+# └── templates/
+#     └── common-steps.yaml
+#
+# 开发环境:
+# --------
+# name: "my-app-dev"
+# env: "development"
+# variables:
+#   debug: "true"
+#   log_level: "debug"
+#
+# 生产环境:
+# --------
+# name: "my-app-prod"
+# env: "production"
+# variables:
+#   debug: "false"
+#   log_level: "warn"
+#
+# 使用时指定不同的配置文件:
+# deploy release -n myapp -f pipelines/pipeline.prod.yaml -i infra/infra.prod.yaml

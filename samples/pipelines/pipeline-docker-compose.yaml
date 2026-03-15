@@ -1,0 +1,69 @@
+name: demo-app-docker-compose
+roles: [docker, nginx]
+
+variables:
+  app_name: demo-app-compose
+  domain: "compose-deploy.shanzilai.com"
+  version: "" # 由系统自动生成流水号或外部通过 --var 注入
+  
+  # 镜像命名空间碎片
+  registry: "registry.cn-qingdao.aliyuncs.com"
+  namespace: "zilai/simple"
+  image_name: "demo-app"
+  
+  # 🌟 核心拼装：完整的镜像名，构建和部署都用这一个变量
+  my_full_image: "${registry}/${namespace}:${image_name}-${version}"
+  
+  health_check_port: "8082"
+  health_check_path: "/api/health"
+
+pipeline:
+  # 构建阶段
+  build:
+    - name: "CI Compose"
+      type: include
+      with:
+        template: "../templates/docker-build-push.yaml"
+        vars:
+          workDir: "demo-app"
+          full_image: "${my_full_image}"
+
+  # 部署阶段
+  deploy:
+    - name: "CD Compose"
+      type: include
+      with:
+        template: "../templates/docker-compose-deploy.yaml"
+        vars:
+          role: "docker"
+          project_name: "demo-app"
+          compose_file: "./demo-app/docker-compose.yml"
+          registry: "${registry}" 
+          full_image: "${my_full_image}"
+          port: "${health_check_port}"
+          health_path: "${health_check_path}"
+          pull_always: "true"
+
+    # 网关与 DNS 配置（自动等待 CD Compose 中的健康检查完毕）
+    - name: "Update Nginx Config"
+      type: nginx_config
+      roles: [nginx]
+      needs: ["CD Compose"]
+      with:
+        template: "../templates/nginx-api.tmpl"
+        upstream_roles: ["docker"]
+        params:
+          domain: "${domain}"
+          filename: "${app_name}.conf"
+          apiPrefix: "/"
+          port: ${health_check_port}
+
+    - name: "Update DNS Records"
+      type: dns_record
+      roles: []
+      needs: ["Update Nginx Config"]
+      with:
+        provider: "aliyun"
+        domain: "${domain}"
+        record_type: "A"
+        target_roles: ["nginx"]

@@ -1,0 +1,36 @@
+{{ if and .ssl .ssl_cert_path .ssl_key_path }}
+{{ if ne .redirect_http_to_https false }}
+# HTTP -> HTTPS 重定向
+server {
+    listen 80;
+    server_name {{ .domain }};
+    return 301 https://$host$request_uri;
+}
+{{ end }}
+{{ end }}
+
+server {
+{{ if and .ssl .ssl_cert_path .ssl_key_path }}
+{{ if ne .redirect_http_to_https false }}
+    listen 443 ssl;
+{{ else }}
+    listen 80;
+    listen 443 ssl;
+{{ end }}
+    ssl_certificate {{ .ssl_cert_path }};
+    ssl_certificate_key {{ .ssl_key_path }};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+{{ else }}
+    listen 80;
+{{ end }}
+    server_name {{ .domain }};
+
+    {{ if .rootPath }}
+    # SPA 静态资源路由（Vue/React History 模式）
+    location / {
+        root {{ .rootPath }};
+        try_files $uri $uri/ /index.html;
+    }
+    {{ end }}
+}

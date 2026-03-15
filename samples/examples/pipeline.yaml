@@ -1,0 +1,19 @@
+name: demo-pipeline
+env: prod
+pipeline:
+  steps:
+    - name: build
+      type: local_command
+      with:
+        cmd: "echo build"
+    - name: transfer
+      type: transfer
+      needs: [build]
+      with:
+        source: ./bin
+        target: /opt/app
+    - name: restart
+      type: remote_command
+      needs: [transfer]
+      with:
+        cmd: "echo restarted"

@@ -1,0 +1,54 @@
+# ./templates/nginx-static-deploy.yaml
+steps:
+  - name: Prepare Dir
+    type: remote_command
+    roles: ["${vars.role}"]
+    with:
+      cmd: "mkdir -p ${vars.release_dir}/${version}"
+
+  - name: Upload & Extract
+    type: transfer
+    roles: ["${vars.role}"]
+    needs: [Prepare Dir]
+    with:
+      source: "${vars.artifact}"
+      target: "${vars.release_dir}/${version}/"
+      compress: true
+
+  - name: Clean Tarball
+    type: remote_command
+    roles: ["${vars.role}"]
+    needs: [Upload & Extract]
+    with:
+      cmd: "cd ${vars.release_dir}/${version} && tar -xzf *.tar.gz && rm -f *.tar.gz"
+
+  - name: Switch Link
+    type: symlink_switch
+    roles: ["${vars.role}"]
+    needs: [Clean Tarball]
+    with:
+      target_dir: "${vars.release_dir}/${version}"
+      link_path: "${vars.current_dir}"
+
+  - name: Reload Nginx
+    type: nginx_config
+    roles: ["${vars.role}"]
+    needs: [Switch Link]
+    with:
+      template: "${vars.nginx_tmpl}"
+      upstream_roles: ["${vars.upstream_role}"]
+      params:
+        domain: "${vars.domain}"
+        filename: "${vars.domain}.conf"
+        rootPath: "${vars.current_dir}"
+        apiPrefix: "${vars.api_prefix}"
+        port: "${vars.upstream_port}"
+
+  - name: Prune Releases
+    type: release_pruner
+    roles: ["${vars.role}"]
+    needs: [Reload Nginx]
+    with:
+      versions_dir: "${vars.release_dir}"
+      keep: 5
+      link_path: "${vars.current_dir}"

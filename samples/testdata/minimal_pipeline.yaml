@@ -1,0 +1,13 @@
+name: minimal
+env: test
+pipeline:
+  steps:
+    - name: step1
+      type: local_command
+      with:
+        cmd: "echo step1"
+    - name: step2
+      type: local_command
+      needs: [step1]
+      with:
+        cmd: "echo step2"

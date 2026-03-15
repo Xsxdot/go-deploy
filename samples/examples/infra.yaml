@@ -1,0 +1,16 @@
+resources:
+  "jump-server":
+    addr: "203.0.113.10"
+    user: "root"
+    auth:
+      keyPath: "~/.ssh/id_rsa"
+
+  "node-01":
+    addr: "10.0.0.5"
+    user: "deploy"
+    bastion: "jump-server"
+    auth:
+      keyPath: "~/.ssh/id_rsa"
+
+roles:
+  compute: [node-01]

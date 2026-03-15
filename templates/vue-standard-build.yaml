@@ -1,0 +1,16 @@
+# ./templates/vue-standard-build.yaml
+steps:
+  - name: Build
+    type: local_command
+    with:
+      workDir: "${vars.workDir}"
+      # 产物直接输出到专属的临时隔离目录，绝不污染源码
+      cmd: "npm ci && npm run build -- --outDir ${run_temp_dir}/${vars.artifact_name}/dist"
+  
+  - name: Package
+    type: archive
+    needs: [Build]
+    with:
+      source: "${run_temp_dir}/${vars.artifact_name}/dist"
+      dest: "${artifacts_dir}/${app_name}/${version}"
+      basename: "${vars.artifact_name}-${version}.tar.gz"

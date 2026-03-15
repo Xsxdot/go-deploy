@@ -1,0 +1,13 @@
+# ./templates/docker-build-tar.yaml
+steps:
+  - name: Build Docker Image
+    type: local_command
+    with:
+      workDir: "${vars.workDir}"
+      cmd: "docker build -t ${vars.full_image} ."
+
+  - name: Save Image Tarball
+    type: local_command
+    needs: [Build Docker Image]
+    with:
+      cmd: "mkdir -p ${artifacts_dir}/${app_name}/${version} && docker save ${vars.full_image} -o ${artifacts_dir}/${app_name}/${version}/${vars.tar_name}.tar"

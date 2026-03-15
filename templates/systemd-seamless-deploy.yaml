@@ -1,0 +1,78 @@
+# ./templates/systemd-seamless-deploy.yaml
+steps:
+  - name: Prepare Dir
+    type: remote_command
+    roles: ["${vars.role}"]
+    with:
+      cmd: "mkdir -p ${vars.release_dir}/${version}"
+
+  - name: Upload
+    type: transfer
+    roles: ["${vars.role}"]
+    needs: [Prepare Dir]
+    with:
+      source: "${vars.artifact}"
+      target: "${vars.release_dir}/${version}/"
+      full_purge_target: "${vars.release_dir}/.."
+      compress: true
+
+  - name: Extract
+    type: remote_command
+    roles: ["${vars.role}"]
+    needs: [Upload]
+    with:
+      cmd: |
+        cd ${vars.release_dir}/${version}
+        tar -xzf *.tar.gz && rm -f *.tar.gz
+        chmod +x ${vars.binary_name} || true
+
+  - name: Switch Link
+    type: symlink_switch
+    roles: ["${vars.role}"]
+    needs: [Extract]
+    with:
+      target_dir: "${vars.release_dir}/${version}"
+      link_path: "${vars.current_dir}"
+
+  - name: Setup Systemd
+    type: systemd_service
+    roles: ["${vars.role}"]
+    needs: [Switch Link]
+    with:
+      name: "${vars.app_name}"
+      template: "${vars.systemd_tmpl}"
+      params:
+        description: "${vars.app_name} backend service"
+        exec_start: "${vars.exec_start}"
+        working_directory: "${vars.current_dir}"
+        user: "root"
+      daemon_reload: true
+      enable: true
+      restart: true
+
+  - name: Verify Service Status
+    type: systemd_check
+    roles: ["${vars.role}"]
+    needs: [Setup Systemd]
+    with:
+      unit: "${vars.app_name}.service"
+      expected_state: "active"
+      max_retries: 10
+      interval: "3s"
+      status_log_lines: 50
+
+  - name: Health Check
+    type: http_check
+    roles: ["${vars.role}"]
+    needs: [Verify Service Status]
+    with:
+      url: "http://${host}:${vars.port}${vars.health_path}"
+
+  - name: Prune Releases
+    type: release_pruner
+    roles: ["${vars.role}"]
+    needs: [Health Check]
+    with:
+      versions_dir: "${vars.release_dir}"
+      keep: 5
+      link_path: "${vars.current_dir}"

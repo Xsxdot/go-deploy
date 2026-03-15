@@ -1,0 +1,85 @@
+name: demo-app-separate
+roles: [compute, nginx]
+
+variables:
+  app_name: demo-app2
+  binary_name: "demo-server"  # 用于 exec_start 等启动参数
+  domain: "separate-test-deploy.shanzilai.com"
+  version: ""
+  release_dir: "/opt/${app_name}/releases"
+  current_dir: "/opt/${app_name}/current"
+  frontend_release_dir: "/opt/${app_name}/frontend/releases"
+  frontend_current_dir: "/opt/${app_name}/frontend/current"
+  backend_port: "8081"
+  health_check_path: "/api/health"
+
+pipeline:
+  # 🌟 构建阶段：并发执行前后端构建
+  build:
+    - name: "Build Frontend"
+      type: include
+      with:
+        template: "../templates/vue-standard-build.yaml"
+        vars:
+          workDir: "demo-app/frontend"
+          artifact_name: "frontend"
+
+    - name: "Build Backend"
+      type: include
+      with:
+        template: "../templates/go-binary-build.yaml"
+        vars:
+          workDir: "demo-app/backend"
+          binary_name: "demo-server"
+          artifact_name: "backend"
+
+  # 🌟 部署阶段：依次执行后端 -> 前端网关 -> DNS
+  deploy:
+    - name: "Production Approval"
+      type: manual_approval
+      run_if: '${env} == "prod"'
+      with:
+        message: "即将部署到生产环境 (${app_name} v${version})，确认继续？"
+        timeout: "60m"
+
+    - name: "Deploy Backend"
+      type: include
+      needs: ["Production Approval"]
+      with:
+        template: "../templates/systemd-seamless-deploy.yaml"
+        vars:
+          role: "compute"
+          artifact: "${artifacts_dir}/${app_name}/${version}/backend-${version}.tar.gz"
+          release_dir: "${release_dir}"
+          current_dir: "${current_dir}"
+          binary_name: "demo-server"
+          app_name: "demo-app-backend"
+          port: "${backend_port}"
+          health_path: "${health_check_path}"
+          systemd_tmpl: "../templates/systemd.app.tmpl"
+          exec_start: "${current_dir}/${binary_name} -port ${backend_port}"  # 可自定义为任意启动命令
+
+    - name: "Deploy Frontend"
+      type: include
+      needs: ["Deploy Backend"] # 必须等后端 API 就绪，前端流量再切入
+      with:
+        template: "../templates/nginx-static-deploy.yaml"
+        vars:
+          role: "nginx"
+          upstream_role: "compute"
+          artifact: "${artifacts_dir}/${app_name}/${version}/frontend-${version}.tar.gz"
+          release_dir: "${frontend_release_dir}"
+          current_dir: "${frontend_current_dir}"
+          domain: "${domain}"
+          api_prefix: "/api"
+          upstream_port: "${backend_port}"
+          nginx_tmpl: "../templates/nginx-api.tmpl"
+
+    - name: "Update DNS"
+      type: dns_record
+      needs: ["Deploy Frontend"]
+      with:
+        provider: "aliyun"
+        domain: "${domain}"
+        record_type: "A"
+        target_roles: ["nginx"]

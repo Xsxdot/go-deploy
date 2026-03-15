@@ -1,0 +1,77 @@
+name: demo-app-docker-offline
+roles: [docker, nginx]
+
+variables:
+  app_name: demo-app
+  domain: "dockertest-deploy.shanzilai.com"
+  version: ""
+  
+  # 离线环境无需 registry
+  image_name: "demo-app3"
+  container_name: "demo-app3"
+  
+  # 🌟 核心拼装：由于没有远端仓库，这里只需 名字:版本
+  my_full_image: "${image_name}:${version}"
+  
+  # 打包与传输专用的纯文件名标识
+  tarball_name: "${image_name}-${version}"
+  
+  health_check_port: "8084"
+  health_check_path: "/api/health"
+
+pipeline:
+  build:
+    - name: "CI Offline"
+      type: include
+      with:
+        template: "../templates/docker-build-tar.yaml"
+        vars:
+          workDir: "demo-app"
+          full_image: "${my_full_image}"
+          tar_name: "${tarball_name}"
+
+  deploy:
+    - name: "Transfer Image"
+      type: include
+      with:
+        template: "../templates/docker-tar-load.yaml"
+        vars:
+          role: "docker"
+          tar_name: "${tarball_name}"
+          remote_dir: "/opt/${app_name}/images"
+
+    - name: "CD Offline Container"
+      type: include
+      needs: ["Transfer Image"]
+      with:
+        template: "../templates/docker-container-deploy.yaml"
+        vars:
+          role: "docker"
+          container_name: "${container_name}"
+          full_image: "${my_full_image}"
+          port: "${health_check_port}"
+          health_path: "${health_check_path}"
+          pull_always: "false" # 本地已加载，无需 pull
+
+    - name: "Update Nginx Config"
+      type: nginx_config
+      roles: [nginx]
+      needs: ["CD Offline Container"]
+      with:
+        template: "../templates/nginx-api.tmpl"
+        upstream_roles: ["docker"]
+        params:
+          domain: "${domain}"
+          filename: "demo-app-docker.conf"
+          apiPrefix: "/"
+          port: ${health_check_port}
+
+    - name: "Update DNS Records"
+      type: dns_record
+      roles: []
+      needs: ["Update Nginx Config"]
+      with:
+        provider: "aliyun"
+        domain: "${domain}"
+        record_type: "A"
+        target_roles: ["nginx"]

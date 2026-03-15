@@ -1,0 +1,54 @@
+{{ if .UpstreamIPs }}
+# 动态生成的负载均衡池（走内网 IP）
+upstream backend_pool_{{ .domain }} {
+    {{ range .UpstreamIPs }}
+    server {{ . }}:{{ if $.port }}{{ $.port }}{{ else }}8080{{ end }};
+    {{ end }}
+}
+{{ end }}
+
+{{ if and .ssl .ssl_cert_path .ssl_key_path }}
+{{ if ne .redirect_http_to_https false }}
+# HTTP -> HTTPS 重定向
+server {
+    listen 80;
+    server_name {{ .domain }};
+    return 301 https://$host$request_uri;
+}
+{{ end }}
+{{ end }}
+
+server {
+{{ if and .ssl .ssl_cert_path .ssl_key_path }}
+{{ if ne .redirect_http_to_https false }}
+    listen 443 ssl;
+{{ else }}
+    listen 80;
+    listen 443 ssl;
+{{ end }}
+    ssl_certificate {{ .ssl_cert_path }};
+    ssl_certificate_key {{ .ssl_key_path }};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+{{ else }}
+    listen 80;
+{{ end }}
+    server_name {{ .domain }};
+
+    {{ if .rootPath }}
+    # 纯前端静态资源路由
+    location / {
+        root {{ .rootPath }};
+        try_files $uri $uri/ /index.html;
+    }
+    {{ end }}
+
+    {{ if .UpstreamIPs }}
+    # API 反向代理路由
+    location {{ if .apiPrefix }}{{ .apiPrefix }}{{ else }}/{{ end }} {
+        proxy_pass http://backend_pool_{{ .domain }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+    {{ end }}
+}

@@ -1,0 +1,22 @@
+name: include-demo
+env: prod
+pipeline:
+  steps:
+    - name: "Push to OSS"
+      type: local_command
+      with:
+        cmd: "echo push"
+
+    - name: "Canary Deployment"
+      type: include
+      needs: [ "Push to OSS" ]
+      with:
+        template: "templates/canary-release.yaml"
+        vars:
+          target_group: "compute_canary"
+
+    - name: "Send Notification"
+      type: local_command
+      needs: [ "Canary Deployment" ]
+      with:
+        cmd: "echo Done!"

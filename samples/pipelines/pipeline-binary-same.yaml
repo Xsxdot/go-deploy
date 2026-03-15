@@ -1,0 +1,88 @@
+name: demo-app-binary-same
+roles: ["${target_compute}", "${target_nginx}"]
+
+variables:
+  target_compute: "compute"   # prod 使用 compute -> tencent, local
+  target_nginx: "nginx"      # prod 使用 nginx -> 106.15.3.15
+  app_name: demo-app
+  binary_name: "demo-server"  # 用于 exec_start 等启动参数
+  version: ""
+  release_dir: "/opt/demo-app/releases"
+  current_dir: "/opt/demo-app/current"
+  health_check_port: "8085"
+  health_check_path: "/api/health"
+
+environments:
+  prod:
+    variables:
+      target_compute: "compute"
+      target_nginx: "nginx"
+      domain: "prod-deploy.shanzilai.com"
+
+  test:
+    variables:
+      target_compute: "compute-test"
+      target_nginx: "nginx-test"
+      domain: "test-deploy.shanzilai.com"
+
+
+pipeline:
+  # 🌟 构建阶段：使用同机组合构建模板
+  build:
+    - name: "Build App"
+      type: include
+      with:
+        template: "../templates/vue-go-combined-build.yaml"
+        vars:
+          frontend_dir: "demo-app/frontend"
+          backend_dir: "demo-app/backend"
+          binary_name: "demo-server"
+          artifact_name: "${app_name}-combined"
+
+  # 🌟 部署阶段：使用后端部署模板 + Nginx 配置下发
+  deploy:
+    - name: "Production Approval"
+      type: manual_approval
+      run_if: '${env} == "prod"'
+      with:
+        message: "即将部署到生产环境 (${app_name} v${version})，确认继续？"
+        timeout: "60m"
+
+    - name: "Deploy Service"
+      type: include
+      needs: ["Production Approval"]
+      with:
+        template: "../templates/systemd-seamless-deploy.yaml"
+        vars:
+          role: "${target_compute}"
+          artifact: "${artifacts_dir}/${app_name}/${version}/${app_name}-combined-${version}.tar.gz" # 无缝承接确定的制品路径
+          release_dir: "${release_dir}"
+          current_dir: "${current_dir}"
+          binary_name: "demo-server"
+          app_name: "${app_name}"
+          port: "${health_check_port}"
+          health_path: "${health_check_path}"
+          systemd_tmpl: "../templates/systemd.app.tmpl"
+          exec_start: "${current_dir}/${binary_name} -port ${health_check_port} -static-dir ${current_dir}/static"  # 可自定义为任意启动命令
+
+    - name: "Configure Nginx"
+      type: nginx_config
+      roles: ["${target_nginx}"]
+      needs: ["Deploy Service"] # expander 会自动等待 Deploy Service 里的 Health Check 跑完！
+      with:
+        template: "../templates/nginx-api.tmpl"
+        upstream_roles: ["${target_compute}"]
+        params:
+          domain: "${domain}"
+          filename: "demo-app-same.conf"
+          apiPrefix: "/"
+          port: ${health_check_port}
+
+    - name: "Update DNS"
+      type: dns_record
+      needs: ["Configure Nginx"]
+      with:
+        provider: "aliyun"
+        domain: "${domain}"
+        record_type: "A"
+        target_roles: ["${target_nginx}"]

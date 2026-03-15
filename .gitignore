@@ -1,0 +1,44 @@
+# Node.js dependencies
+samples/demo-app/frontend/node_modules/
+
+# Backend static (generated/build output)
+samples/demo-app/backend/static/
+
+# Resources
+resources/
+
+# 构建脚本及其制品 (本地使用，不入库)
+build.sh
+dist/
+
+# Go 构建的二进制文件
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+deploy
+nova_depoly
+/bin/
+dist/
+
+# Go 调试文件
+__debug_bin*
+*.test
+*.out
+*.prof
+*.pprof
+*.dSYM/
+
+# Delve 调试器
+__debug_bin
+
+# 其他常见忽略项
+.idea/
+*.log
+.DS_Store
+*.swp
+*.swo
+*~
+.env
+.env.local

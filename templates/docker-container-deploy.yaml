@@ -1,0 +1,29 @@
+# ./templates/docker-container-deploy.yaml
+steps:
+  - name: Run Container
+    type: docker_container
+    roles: ["${vars.role}"]
+    with:
+      container_name: "${vars.container_name}"
+      image: "${vars.full_image}"
+      ports: ["${vars.port}:8080"]
+      restart_policy: "unless-stopped"
+      pull_always: ${vars.pull_always}
+      timeout: "120s"
+
+  - name: Verify Container
+    type: docker_check
+    roles: ["${vars.role}"]
+    needs: [Run Container]
+    with:
+      container: "${vars.container_name}"
+      max_retries: 10
+      interval: "5s"
+
+  - name: Health Check
+    type: http_check
+    roles: ["${vars.role}"]
+    needs: [Verify Container]
+    with:
+      url: "http://${host}:${vars.port}${vars.health_path}"
+      expected_status: 200

@@ -1,0 +1,10 @@
+# ./templates/docker-build-push.yaml
+steps:
+  - name: Build and Push
+    type: local_command
+    with:
+      workDir: "${vars.workDir}"
+      cmd: |
+        set -e
+        docker build -t ${vars.full_image} .
+        docker push ${vars.full_image}

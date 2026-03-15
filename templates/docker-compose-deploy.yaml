@@ -1,0 +1,23 @@
+# ./templates/docker-compose-deploy.yaml
+steps:
+  - name: Run Docker Compose
+    type: docker_compose
+    roles: ["${vars.role}"]
+    with:
+      project_name: "${vars.project_name}"
+      compose_file: "${vars.compose_file}"
+      registry: "${vars.registry}" # 仅用于注入 .env 的 DOCKER_REGISTRY 供私有库登录
+      env_vars: 
+        IMAGE: "${vars.full_image}"
+        APP_PORT: "${vars.port}"
+        ENV: "${env}"
+      pull_always: ${vars.pull_always}
+      timeout: "120s"
+
+  - name: Health Check
+    type: http_check
+    roles: ["${vars.role}"]
+    needs: [Run Docker Compose]
+    with:
+      url: "http://${host}:${vars.port}${vars.health_path}"
+      expected_status: 200

@@ -1,0 +1,64 @@
+name: demo-app-docker-container
+roles: [docker, nginx]
+
+variables:
+  app_name: demo-app-container
+  domain: "container-deploy.shanzilai.com"
+  version: ""
+  
+  registry: "registry.cn-qingdao.aliyuncs.com"
+  namespace: "zilai/simple"
+  image_name: "demo-app2"
+  container_name: "demo-app2"
+  
+  # 🌟 核心拼装
+  my_full_image: "${registry}/${namespace}:${image_name}-${version}"
+  
+  health_check_port: "8083"
+  health_check_path: "/api/health"
+
+pipeline:
+  build:
+    - name: "CI Container"
+      type: include
+      with:
+        template: "../templates/docker-build-push.yaml"
+        vars:
+          workDir: "demo-app"
+          full_image: "${my_full_image}"
+
+  deploy:
+    - name: "CD Container"
+      type: include
+      with:
+        template: "../templates/docker-container-deploy.yaml"
+        vars:
+          role: "docker"
+          container_name: "${container_name}"
+          full_image: "${my_full_image}"
+          port: "${health_check_port}"
+          health_path: "${health_check_path}"
+          pull_always: "true"
+
+    - name: "Update Nginx Config"
+      type: nginx_config
+      roles: [nginx]
+      needs: ["CD Container"]
+      with:
+        template: "../templates/nginx-api.tmpl"
+        upstream_roles: ["docker"]
+        params:
+          domain: "${domain}"
+          filename: "${app_name}.conf"
+          apiPrefix: "/"
+          port: ${health_check_port}
+
+    - name: "Update DNS Records"
+      type: dns_record
+      roles: []
+      needs: ["Update Nginx Config"]
+      with:
+        provider: "aliyun"
+        domain: "${domain}"
+        record_type: "A"
+        target_roles: ["nginx"]

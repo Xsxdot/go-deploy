@@ -1,0 +1,14 @@
+steps:
+  - name: "Fetch & Extract"
+    type: local_command
+    roles: [ "${vars.target_group}" ]
+    retries: 3
+    with:
+      cmd: "echo fetch"
+
+  - name: "Switch & Restart"
+    type: local_command
+    needs: [ "Fetch & Extract" ]
+    roles: [ "${vars.target_group}" ]
+    with:
+      cmd: "echo restart"

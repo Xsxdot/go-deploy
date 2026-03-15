@@ -1,0 +1,19 @@
+[Unit]
+Description={{ if .description }}{{ .description }}{{ else }}DeployFlow managed application service{{ end }}
+After=network.target
+
+[Service]
+Type=simple
+ExecStart={{ .exec_start }}
+WorkingDirectory={{ .working_directory }}
+User={{ if .user }}{{ .user }}{{ else }}root{{ end }}
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+{{ if .environment }}
+Environment={{ .environment }}
+{{ end }}
+
+[Install]
+WantedBy=multi-user.target

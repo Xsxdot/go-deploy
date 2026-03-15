@@ -1,0 +1,23 @@
+# ./templates/docker-tar-load.yaml
+steps:
+  - name: Prepare Remote Dir
+    type: remote_command
+    roles: ["${vars.role}"]
+    with:
+      cmd: "mkdir -p ${vars.remote_dir}"
+
+  - name: Upload Image
+    type: transfer
+    roles: ["${vars.role}"]
+    needs: [Prepare Remote Dir]
+    with:
+      source: "${artifacts_dir}/${app_name}/${version}/${vars.tar_name}.tar"
+      target: "${vars.remote_dir}/"
+      compress: false
+
+  - name: Load Image
+    type: remote_command
+    roles: ["${vars.role}"]
+    needs: [Upload Image]
+    with:
+      cmd: "cd ${vars.remote_dir} && docker load -i ${vars.tar_name}.tar"

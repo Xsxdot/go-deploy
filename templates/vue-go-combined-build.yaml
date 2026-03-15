@@ -1,0 +1,22 @@
+# ./templates/vue-go-combined-build.yaml
+steps:
+  - name: Build Frontend Vue Template Combine
+    type: local_command
+    with:
+      workDir: "${vars.frontend_dir}"
+      cmd: "npm ci && npm run build -- --outDir ${run_temp_dir}/${vars.artifact_name}/static --emptyOutDir"
+
+  - name: Build Go Binary Template Combine
+    type: local_command
+    # 前后端互相独立，其实无需 needs，引擎会并发执行，极大提升构建速度！
+    with:
+      workDir: "${vars.backend_dir}"
+      cmd: "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ${run_temp_dir}/${vars.artifact_name}/${vars.binary_name} ."
+
+  - name: Package Combined
+    type: archive
+    needs: [Build Frontend Vue Template Combine, Build Go Binary Template Combine] # 等待两者都编译完
+    with:
+      source: "${run_temp_dir}/${vars.artifact_name}"
+      dest: "${artifacts_dir}/${app_name}/${version}"
+      basename: "${vars.artifact_name}-${version}.tar.gz"

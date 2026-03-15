@@ -1,0 +1,15 @@
+# ./templates/go-binary-build.yaml
+steps:
+  - name: Build
+    type: local_command
+    with:
+      workDir: "${vars.workDir}"
+      cmd: "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ${run_temp_dir}/${vars.artifact_name}/${vars.binary_name} ."
+  
+  - name: Package
+    type: archive
+    needs: [Build]
+    with:
+      source: "${run_temp_dir}/${vars.artifact_name}/${vars.binary_name}"
+      dest: "${artifacts_dir}/${app_name}/${version}"
+      basename: "${vars.artifact_name}-${version}.tar.gz"
