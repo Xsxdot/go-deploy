@@ -19,12 +19,18 @@ variables:
   health_check_port: "8084"
   health_check_path: "/api/health"
 
+  # SSL 配置（可选）
+  ssl_enabled: ""     # 设为 "true" 时启用 HTTPS，需同时配置 cert/key 路径
+  ssl_cert_path: ""   # 如 "/etc/nginx/ssl/${domain}.crt"
+  ssl_key_path: ""    # 如 "/etc/nginx/ssl/${domain}.key"
+  redirect_http_to_https: "true"
+
 pipeline:
   build:
     - name: "CI Offline"
       type: include
       with:
-        template: "../templates/docker-build-tar.yaml"
+        template: "@/templates/docker-build-tar.yaml"
         vars:
           workDir: "demo-app"
           full_image: "${my_full_image}"
@@ -34,7 +40,7 @@ pipeline:
     - name: "Transfer Image"
       type: include
       with:
-        template: "../templates/docker-tar-load.yaml"
+        template: "@/templates/docker-tar-load.yaml"
         vars:
           role: "docker"
           tar_name: "${tarball_name}"
@@ -44,7 +50,7 @@ pipeline:
       type: include
       needs: ["Transfer Image"]
       with:
-        template: "../templates/docker-container-deploy.yaml"
+        template: "@/templates/docker-container-deploy.yaml"
         vars:
           role: "docker"
           container_name: "${container_name}"
@@ -58,13 +64,17 @@ pipeline:
       roles: [nginx]
       needs: ["CD Offline Container"]
       with:
-        template: "../templates/nginx-api.tmpl"
+        template: "@/templates/nginx-api.tmpl"
         upstream_roles: ["docker"]
         params:
           domain: "${domain}"
           filename: "demo-app-docker.conf"
           apiPrefix: "/"
           port: ${health_check_port}
+          ssl: "${ssl_enabled}"
+          ssl_cert_path: "${ssl_cert_path}"
+          ssl_key_path: "${ssl_key_path}"
+          redirect_http_to_https: "${redirect_http_to_https}"
 
     - name: "Update DNS Records"
       type: dns_record

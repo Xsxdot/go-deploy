@@ -43,6 +43,11 @@ steps:
         rootPath: "${vars.current_dir}"
         apiPrefix: "${vars.api_prefix}"
         port: "${vars.upstream_port}"
+        # SSL 配置（可选）：传入 vars.ssl_enabled="true" 及 cert/key 路径时启用 HTTPS
+        ssl: "${vars.ssl_enabled}"
+        ssl_cert_path: "${vars.ssl_cert_path}"
+        ssl_key_path: "${vars.ssl_key_path}"
+        redirect_http_to_https: "${vars.redirect_http_to_https}"
 
   - name: Prune Releases
     type: release_pruner

@@ -317,3 +317,27 @@ func TestExpandPipeline_MissingTemplatePath(t *testing.T) {
 		t.Error("expected error for missing template path")
 	}
 }
+
+func TestExpandPipeline_AtPathAlias(t *testing.T) {
+	baseDir := testdataDir(t)
+	pipeline := &core.Pipeline{
+		Name: "demo",
+		Steps: []core.Step{
+			{
+				Name:  "Canary",
+				Type:  "include",
+				With: map[string]interface{}{
+					"template": "@/templates/canary-release.yaml",
+					"vars":     map[string]interface{}{"target_group": "compute"},
+				},
+			},
+		},
+	}
+	expanded, err := ExpandPipeline(pipeline, baseDir)
+	if err != nil {
+		t.Fatalf("ExpandPipeline: %v", err)
+	}
+	if len(expanded.Steps) != 2 {
+		t.Errorf("expected 2 steps, got %d", len(expanded.Steps))
+	}
+}

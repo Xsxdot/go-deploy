@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,8 +98,10 @@ func NewDeployContext(parent context.Context, infra *InfraConfig, pipeline *Pipe
 }
 
 // ResolvePath 将相对路径解析为绝对路径，统一用 filepath.Clean 防止路径穿越。
-// 若 path 已是绝对路径，则 Clean 后返回；若 WorkspaceDir 为空，则基于当前目录 Abs；否则基于 WorkspaceDir Join。
+// 支持 @/ 前缀表示 workspace 根；若 path 已是绝对路径，则 Clean 后返回；
+// 若 WorkspaceDir 为空，则基于当前目录 Abs；否则基于 WorkspaceDir Join。
 func (c *DeployContext) ResolvePath(path string) string {
+	path = strings.TrimPrefix(path, "@/") // @/ 表示 workspace 根
 	if filepath.IsAbs(path) {
 		return filepath.Clean(path)
 	}

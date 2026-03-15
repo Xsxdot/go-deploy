@@ -334,8 +334,8 @@ pipeline:
       with:
         # name: 服务名，自动补全 .service 后缀
         name: "${app_name}"
-        # template: 本地模板文件路径
-        template: "./templates/systemd.app.tmpl"
+        # template: 本地模板文件路径（支持 @/ 表示 workspace 根）
+        template: "@/templates/systemd.app.tmpl"
         # params: 注入模板的变量（支持 ${var} 渲染）
         params:
           description: "${app_name} Backend Service"
@@ -419,8 +419,8 @@ pipeline:
       roles: ["gateway"]
       needs: ["Health Check"]
       with:
-        # template: Nginx 配置模板路径（必填）
-        template: "./templates/nginx.upstream.tmpl"
+        # template: Nginx 配置模板路径（必填，支持 @/ 表示 workspace 根）
+        template: "@/templates/nginx.upstream.tmpl"
         # upstream_roles: 上游服务器角色组（必填）
         upstream_roles: ["compute"]
         # params: 模板参数（可选）

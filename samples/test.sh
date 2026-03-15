@@ -21,7 +21,7 @@ rm -f ~/.deploy/deploy.db
 # 首次加载全局基础设施（若已存在则用 infra reload）
 ./deploy infra load -f resources/infra.yaml
 
-# 注册 5 个测试流水线（workspace 必须为 samples，否则 ../templates/ 和 demo-app/ 路径无法解析）
+# 注册 5 个测试流水线（workspace 必须为 samples，否则 @/templates/ 和 demo-app/ 路径无法解析）
 ./deploy project load -n demo-app-binary-same -f samples/pipelines/pipeline-binary-same.yaml -d samples
 ./deploy project load -n demo-app-separate -f samples/pipelines/pipeline-binary-separate.yaml -d samples
 ./deploy project load -n demo-app-docker-compose -f samples/pipelines/pipeline-docker-compose.yaml -d samples

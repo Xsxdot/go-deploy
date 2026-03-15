@@ -13,13 +13,19 @@ variables:
   backend_port: "8081"
   health_check_path: "/api/health"
 
+  # SSL 配置（可选）
+  ssl_enabled: ""     # 设为 "true" 时启用 HTTPS，需同时配置 cert/key 路径
+  ssl_cert_path: ""   # 如 "/etc/nginx/ssl/${domain}.crt"
+  ssl_key_path: ""    # 如 "/etc/nginx/ssl/${domain}.key"
+  redirect_http_to_https: "true"
+
 pipeline:
   # 🌟 构建阶段：并发执行前后端构建
   build:
     - name: "Build Frontend"
       type: include
       with:
-        template: "../templates/vue-standard-build.yaml"
+        template: "@/templates/vue-standard-build.yaml"
         vars:
           workDir: "demo-app/frontend"
           artifact_name: "frontend"
@@ -27,7 +33,7 @@ pipeline:
     - name: "Build Backend"
       type: include
       with:
-        template: "../templates/go-binary-build.yaml"
+        template: "@/templates/go-binary-build.yaml"
         vars:
           workDir: "demo-app/backend"
           binary_name: "demo-server"
@@ -46,7 +52,7 @@ pipeline:
       type: include
       needs: ["Production Approval"]
       with:
-        template: "../templates/systemd-seamless-deploy.yaml"
+        template: "@/templates/systemd-seamless-deploy.yaml"
         vars:
           role: "compute"
           artifact: "${artifacts_dir}/${app_name}/${version}/backend-${version}.tar.gz"
@@ -56,14 +62,14 @@ pipeline:
           app_name: "demo-app-backend"
           port: "${backend_port}"
           health_path: "${health_check_path}"
-          systemd_tmpl: "../templates/systemd.app.tmpl"
+          systemd_tmpl: "@/templates/systemd.app.tmpl"
           exec_start: "${current_dir}/${binary_name} -port ${backend_port}"  # 可自定义为任意启动命令
 
     - name: "Deploy Frontend"
       type: include
       needs: ["Deploy Backend"] # 必须等后端 API 就绪，前端流量再切入
       with:
-        template: "../templates/nginx-static-deploy.yaml"
+        template: "@/templates/nginx-static-deploy.yaml"
         vars:
           role: "nginx"
           upstream_role: "compute"
@@ -73,7 +79,11 @@ pipeline:
           domain: "${domain}"
           api_prefix: "/api"
           upstream_port: "${backend_port}"
-          nginx_tmpl: "../templates/nginx-api.tmpl"
+          nginx_tmpl: "@/templates/nginx-api.tmpl"
+          ssl_enabled: "${ssl_enabled}"
+          ssl_cert_path: "${ssl_cert_path}"
+          ssl_key_path: "${ssl_key_path}"
+          redirect_http_to_https: "${redirect_http_to_https}"
 
     - name: "Update DNS"
       type: dns_record

@@ -12,6 +12,12 @@ variables:
   health_check_port: "8085"
   health_check_path: "/api/health"
 
+  # SSL 配置（可选）
+  ssl_enabled: ""     # 设为 "true" 时启用 HTTPS，需同时配置 cert/key 路径
+  ssl_cert_path: ""   # 如 "/etc/nginx/ssl/${domain}.crt"
+  ssl_key_path: ""    # 如 "/etc/nginx/ssl/${domain}.key"
+  redirect_http_to_https: "true"
+
 environments:
   prod:
     variables:
@@ -32,7 +38,7 @@ pipeline:
     - name: "Build App"
       type: include
       with:
-        template: "../templates/vue-go-combined-build.yaml"
+        template: "@/templates/vue-go-combined-build.yaml"
         vars:
           frontend_dir: "demo-app/frontend"
           backend_dir: "demo-app/backend"
@@ -52,7 +58,7 @@ pipeline:
       type: include
       needs: ["Production Approval"]
       with:
-        template: "../templates/systemd-seamless-deploy.yaml"
+        template: "@/templates/systemd-seamless-deploy.yaml"
         vars:
           role: "${target_compute}"
           artifact: "${artifacts_dir}/${app_name}/${version}/${app_name}-combined-${version}.tar.gz" # 无缝承接确定的制品路径
@@ -62,7 +68,7 @@ pipeline:
           app_name: "${app_name}"
           port: "${health_check_port}"
           health_path: "${health_check_path}"
-          systemd_tmpl: "../templates/systemd.app.tmpl"
+          systemd_tmpl: "@/templates/systemd.app.tmpl"
           exec_start: "${current_dir}/${binary_name} -port ${health_check_port} -static-dir ${current_dir}/static"  # 可自定义为任意启动命令
 
     - name: "Configure Nginx"
@@ -70,13 +76,17 @@ pipeline:
       roles: ["${target_nginx}"]
       needs: ["Deploy Service"] # expander 会自动等待 Deploy Service 里的 Health Check 跑完！
       with:
-        template: "../templates/nginx-api.tmpl"
+        template: "@/templates/nginx-api.tmpl"
         upstream_roles: ["${target_compute}"]
         params:
           domain: "${domain}"
           filename: "demo-app-same.conf"
           apiPrefix: "/"
           port: ${health_check_port}
+          ssl: "${ssl_enabled}"
+          ssl_cert_path: "${ssl_cert_path}"
+          ssl_key_path: "${ssl_key_path}"
+          redirect_http_to_https: "${redirect_http_to_https}"
 
     - name: "Update DNS"
       type: dns_record

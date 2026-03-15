@@ -61,8 +61,10 @@ steps:
       interval: "3s"
       status_log_lines: 50
 
+  # 当 vars.skip_http_check 为 true 时跳过。不想要 http_check 时在 variables 中设置 skip_http_check: "true"
   - name: Health Check
     type: http_check
+    run_if: '"${vars.skip_http_check}" != "true"'
     roles: ["${vars.role}"]
     needs: [Verify Service Status]
     with:

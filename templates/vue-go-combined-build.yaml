@@ -1,4 +1,15 @@
 # ./templates/vue-go-combined-build.yaml
+# vars 可选: extra_files - 空格分隔的配置文件/目录路径（相对于 backend_dir），如 "config.yaml configs/"
+# - name: "Build App"
+#   type: include
+#   with:
+#     template: "@/templates/vue-go-combined-build.yaml"
+#     vars:
+#       frontend_dir: "demo-app/frontend"
+#       backend_dir: "demo-app/backend"
+#       binary_name: "demo-server"
+#       artifact_name: "${app_name}-combined"
+#       extra_files: "config.yaml configs/"   # 可选：从 backend 目录复制的配置文件
 steps:
   - name: Build Frontend Vue Template Combine
     type: local_command
@@ -13,9 +24,17 @@ steps:
       workDir: "${vars.backend_dir}"
       cmd: "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ${run_temp_dir}/${vars.artifact_name}/${vars.binary_name} ."
 
+  - name: Copy extra files
+    type: local_command
+    needs: [Build Go Binary Template Combine]
+    run_if: '${vars.extra_files} != ""'
+    with:
+      workDir: "${vars.backend_dir}"
+      cmd: "mkdir -p ${run_temp_dir}/${vars.artifact_name} && for f in ${vars.extra_files}; do [ -n \"$f\" ] && [ -e \"$f\" ] && cp -r \"$f\" ${run_temp_dir}/${vars.artifact_name}/; done"
+
   - name: Package Combined
     type: archive
-    needs: [Build Frontend Vue Template Combine, Build Go Binary Template Combine] # 等待两者都编译完
+    needs: [Build Frontend Vue Template Combine, Build Go Binary Template Combine, Copy extra files] # 等待两者都编译完
     with:
       source: "${run_temp_dir}/${vars.artifact_name}"
       dest: "${artifacts_dir}/${app_name}/${version}"

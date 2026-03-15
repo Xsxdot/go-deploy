@@ -77,10 +77,14 @@ func expandStepArray(steps []core.Step, baseDir string) ([]core.Step, error) {
 			}
 		}
 
-		// 读取文件（支持基于主配置文件的相对路径）
-		absPath := templatePath
+		// 读取文件（支持 @/ 表示 workspace 根、相对路径、绝对路径）
+		resolvedPath := templatePath
+		if strings.HasPrefix(templatePath, "@/") {
+			resolvedPath = templatePath[2:] // strip "@/"
+		}
+		absPath := resolvedPath
 		if !filepath.IsAbs(absPath) && baseDir != "" {
-			absPath = filepath.Join(baseDir, templatePath)
+			absPath = filepath.Join(baseDir, resolvedPath)
 		}
 		data, err := os.ReadFile(absPath)
 		if err != nil {

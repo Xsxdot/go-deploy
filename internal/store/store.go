@@ -452,6 +452,28 @@ func (s *SqliteStore) getLatestDeployment(ctx context.Context, projectName, envN
 	return &d, nil
 }
 
+// ListEnvsForProject 返回指定项目在 deployments 中出现过的环境名列表（去重），供向导下拉使用
+func (s *SqliteStore) ListEnvsForProject(ctx context.Context, projectName string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT COALESCE(d.env_name, 'default') FROM deployments d
+		JOIN projects p ON p.id = d.project_id WHERE p.name = ?
+		ORDER BY 1
+	`, projectName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var envs []string
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return nil, err
+		}
+		envs = append(envs, e)
+	}
+	return envs, rows.Err()
+}
+
 // ListDeployments 按 started_at 倒序获取项目的部署记录，供 history 命令使用
 // envName 为空时列出所有环境；非空时仅列该环境
 func (s *SqliteStore) ListDeployments(ctx context.Context, projectName, envName string, limit int) ([]*Deployment, error) {

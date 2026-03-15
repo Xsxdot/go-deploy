@@ -1,15 +1,34 @@
 # ./templates/go-binary-build.yaml
+# vars 可选: extra_files - 空格分隔的配置文件/目录路径（相对于 workDir），如 "config.yaml configs/ static/"
+# vars 可选: go_build_tags - 非空时在 go build 中插入 -tags "xxx"，如 go_build_tags: "full"
+# - name: "Build Backend"
+#   type: include
+#   with:
+#     template: "@/templates/go-binary-build.yaml"
+#     vars:
+#       workDir: "demo-app/backend"
+#       binary_name: "demo-server"
+#       artifact_name: "backend"
+#       extra_files: "config.yaml configs/ static/"   # 可选：配置文件、配置目录、静态资源等
 steps:
   - name: Build
     type: local_command
     with:
       workDir: "${vars.workDir}"
-      cmd: "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ${run_temp_dir}/${vars.artifact_name}/${vars.binary_name} ."
-  
+      cmd: "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags \"${vars.go_build_tags}\" -o ${run_temp_dir}/${vars.artifact_name}/${vars.binary_name} ."
+
+  - name: Copy extra files
+    type: local_command
+    needs: [Build]
+    run_if: '${vars.extra_files} != ""'
+    with:
+      workDir: "${vars.workDir}"
+      cmd: "mkdir -p ${run_temp_dir}/${vars.artifact_name} && for f in ${vars.extra_files}; do [ -n \"$f\" ] && [ -e \"$f\" ] && cp -r \"$f\" ${run_temp_dir}/${vars.artifact_name}/; done"
+
   - name: Package
     type: archive
-    needs: [Build]
+    needs: [Build, Copy extra files]
     with:
-      source: "${run_temp_dir}/${vars.artifact_name}/${vars.binary_name}"
+      source: "${run_temp_dir}/${vars.artifact_name}"
       dest: "${artifacts_dir}/${app_name}/${version}"
       basename: "${vars.artifact_name}-${version}.tar.gz"

@@ -131,7 +131,10 @@ func (p *ArchivePlugin) writeTarGz(destPath, source string, info os.FileInfo) er
 		return fmt.Errorf("archive: create %q: %w", destPath, err)
 	}
 	defer f.Close()
-	gw := gzip.NewWriter(f)
+	gw, err := gzip.NewWriterLevel(f, gzip.BestCompression)
+	if err != nil {
+		return err
+	}
 	defer gw.Close()
 	tw := tar.NewWriter(gw)
 	defer tw.Close()

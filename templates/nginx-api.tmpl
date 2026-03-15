@@ -8,7 +8,7 @@ upstream backend_pool_{{ .domain }} {
 {{ end }}
 
 {{ if and .ssl .ssl_cert_path .ssl_key_path }}
-{{ if ne .redirect_http_to_https false }}
+{{ if ne .redirect_http_to_https "false" }}
 # HTTP -> HTTPS 重定向
 server {
     listen 80;
@@ -20,7 +20,7 @@ server {
 
 server {
 {{ if and .ssl .ssl_cert_path .ssl_key_path }}
-{{ if ne .redirect_http_to_https false }}
+{{ if ne .redirect_http_to_https "false" }}
     listen 443 ssl;
 {{ else }}
     listen 80;
