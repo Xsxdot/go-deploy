@@ -160,6 +160,8 @@ func TestRender_DefaultValue(t *testing.T) {
 		{"var empty use default", "tag: ${image_tag:-${version}}", map[string]string{"image_tag": "", "version": "v1.0.0"}, "tag: v1.0.0"},
 		{"var missing use default", "tag: ${image_tag:-${version}}", map[string]string{"version": "v1.0.0"}, "tag: v1.0.0"},
 		{"literal default", "port: ${PORT:-8080}", map[string]string{}, "port: 8080"},
+		{"dotted var with default", "dir: ${vars.static_dir:-static}", map[string]string{"vars.static_dir": "web"}, "dir: web"},
+		{"dotted var missing use default", "dir: ${vars.static_dir:-static}", map[string]string{}, "dir: static"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

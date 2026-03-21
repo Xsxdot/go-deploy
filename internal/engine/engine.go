@@ -223,8 +223,8 @@ func trimSpace(s string) string {
 }
 
 var (
-	runIfQuotedRef = regexp.MustCompile(`"\$\{([a-zA-Z0-9_]+)\}"`) // "''${var}" 形式
-	runIfVarRef    = regexp.MustCompile(`\$\{([a-zA-Z0-9_]+)\}`)   // standalone ''${var}''
+	runIfQuotedRef = regexp.MustCompile(`"\$\{([a-zA-Z0-9_.]+)\}"`) // "${var}" 形式，支持带点变量名
+	runIfVarRef    = regexp.MustCompile(`\$\{([a-zA-Z0-9_.]+)\}`)   // standalone ${var}，支持带点变量名
 )
 
 // extractVarRefs 从 run_if 表达式中提取 ${varName} 的变量名，供渲染前补全空值

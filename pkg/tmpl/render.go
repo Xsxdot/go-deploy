@@ -6,14 +6,14 @@ import (
 	"strings"
 )
 
-// varPattern matches ${varName} where varName is alphanumeric or underscore
-var varPattern = regexp.MustCompile(`\$\{([a-zA-Z0-9_]+)\}`)
+// varPattern matches ${varName} where varName is alphanumeric, underscore, or dot (for nested vars like vars.xxx)
+var varPattern = regexp.MustCompile(`\$\{([a-zA-Z0-9_.]+)\}`)
 
 // envPattern matches ${env.VAR_NAME}，用于安全凭据引用，仅在 Render 时实时读取 os.Getenv，不落盘到 vars/SQLite
 var envPattern = regexp.MustCompile(`\$\{env\.([a-zA-Z0-9_]+)\}`)
 
-// defaultVarPattern matches ${varName:-defaultValue}，支持嵌套 ${nested} 或字面量
-var defaultVarPattern = regexp.MustCompile(`\$\{([a-zA-Z0-9_]+):-(\$\{[^}]*\}|[^}]*)\}`)
+// defaultVarPattern matches ${varName:-defaultValue}, supports nested ${nested} or literal, and dotted var names
+var defaultVarPattern = regexp.MustCompile(`\$\{([a-zA-Z0-9_.]+):-(\$\{[^}]*\}|[^}]*)\}`)
 
 const maxExpandDepth = 32 // prevent infinite recursion from circular refs
 

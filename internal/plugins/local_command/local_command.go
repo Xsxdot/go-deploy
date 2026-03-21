@@ -53,14 +53,25 @@ func (p *LocalCommandPlugin) runCommand(ctx *core.DeployContext, step core.Step,
 	workDir := maputil.GetString(step.With, "workDir")
 	envRaw := step.With["env"]
 
+	// 渲染工作目录
+	if workDir != "" && ctx.Render != nil {
+		workDir = ctx.Render(workDir)
+	}
+
+	// 输出实际执行的命令和工作目录
+	if ctx.Bus != nil {
+		ctx.LogInfo(step.Name, "", "=== Executing command ===")
+		ctx.LogInfo(step.Name, "", "Cmd: "+cmdStr)
+		if workDir != "" {
+			ctx.LogInfo(step.Name, "", "WorkDir: "+ctx.ResolvePath(workDir))
+		}
+	}
+
 	// 构造 exec.Cmd，使用 sh -c 支持完整 Shell 语义
 	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
 
 	// 工作目录：若指定则使用 ResolvePath；否则使用 WorkspaceDir；都空则当前目录
 	if workDir != "" {
-		if ctx.Render != nil {
-			workDir = ctx.Render(workDir)
-		}
 		cmd.Dir = ctx.ResolvePath(workDir)
 	} else if ctx.WorkspaceDir != "" {
 		cmd.Dir = ctx.WorkspaceDir

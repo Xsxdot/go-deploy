@@ -1,0 +1,5 @@
+steps:
+  - name: Echo
+    type: local_command
+    with:
+      cmd: "echo ${vars.static_dir:-static}"

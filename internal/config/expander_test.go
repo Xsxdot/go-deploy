@@ -341,3 +341,90 @@ func TestExpandPipeline_AtPathAlias(t *testing.T) {
 		t.Errorf("expected 2 steps, got %d", len(expanded.Steps))
 	}
 }
+
+// TestExpandPipeline_VarsWithDefaultValue 测试 ${vars.key:-default} 语法
+func TestExpandPipeline_VarsWithDefaultValue(t *testing.T) {
+	baseDir := testdataDir(t)
+
+	t.Run("var exists", func(t *testing.T) {
+		pipeline := &core.Pipeline{
+			Name: "default-test",
+			Steps: []core.Step{
+				{
+					Name: "Build",
+					Type: "include",
+					With: map[string]interface{}{
+						"template": "templates/with-default.yaml",
+						"vars": map[string]interface{}{
+							"static_dir": "web", // 提供值
+						},
+					},
+				},
+			},
+		}
+
+		expanded, err := ExpandPipeline(pipeline, baseDir)
+		if err != nil {
+			t.Fatalf("ExpandPipeline: %v", err)
+		}
+
+		cmd := expanded.Steps[0].With["cmd"].(string)
+		if cmd != "echo web" {
+			t.Errorf("static_dir replacement: got %q, want %q", cmd, "echo web")
+		}
+	})
+
+	t.Run("var missing use default", func(t *testing.T) {
+		pipeline := &core.Pipeline{
+			Name: "default-test",
+			Steps: []core.Step{
+				{
+					Name: "Build",
+					Type: "include",
+					With: map[string]interface{}{
+						"template": "templates/with-default.yaml",
+						"vars":      map[string]interface{}{}, // 不提供 static_dir
+					},
+				},
+			},
+		}
+
+		expanded, err := ExpandPipeline(pipeline, baseDir)
+		if err != nil {
+			t.Fatalf("ExpandPipeline: %v", err)
+		}
+
+		cmd := expanded.Steps[0].With["cmd"].(string)
+		if cmd != "echo static" {
+			t.Errorf("default value: got %q, want %q", cmd, "echo static")
+		}
+	})
+
+	t.Run("var empty use default", func(t *testing.T) {
+		pipeline := &core.Pipeline{
+			Name: "default-test",
+			Steps: []core.Step{
+				{
+					Name: "Build",
+					Type: "include",
+					With: map[string]interface{}{
+						"template": "templates/with-default.yaml",
+						"vars": map[string]interface{}{
+							"static_dir": "", // 空字符串，应使用默认值
+						},
+					},
+				},
+			},
+		}
+
+		expanded, err := ExpandPipeline(pipeline, baseDir)
+		if err != nil {
+			t.Fatalf("ExpandPipeline: %v", err)
+		}
+
+		cmd := expanded.Steps[0].With["cmd"].(string)
+		if cmd != "echo static" {
+			t.Errorf("empty var should use default: got %q, want %q", cmd, "echo static")
+		}
+	})
+}

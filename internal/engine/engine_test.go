@@ -746,3 +746,45 @@ func TestEngine_FromVersionMergesParamsSnapshot(t *testing.T) {
 		t.Errorf("artifact_tag from history snapshot: got %v, want abc1234", g)
 	}
 }
+
+// TestEngine_RunIfWithDottedVar 验证 run_if 支持带点的变量名如 ${vars.extra_files}
+func TestEngine_RunIfWithDottedVar(t *testing.T) {
+	cap := &runIfCapturePlugin{}
+	eng := NewEngine()
+	eng.Register(cap)
+
+	pipelineConfig := &core.PipelineConfig{
+		Variables: map[string]string{"vars.extra_files": "config.yaml"},
+		Pipeline: core.Pipeline{
+			Name: "dotted-var-test",
+			Steps: []core.Step{
+				{
+					Name:  "copy",
+					Type:  "runif_capture",
+					RunIf: `"${vars.extra_files}" != ""`,
+					With:  map[string]interface{}{"phase": "copy"},
+				},
+			},
+		},
+	}
+
+	opts := RunOpts{Env: "default"}
+	err := eng.Run(context.Background(), &pipelineConfig.Pipeline, nil, pipelineConfig, nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cap.executed) != 1 || cap.executed[0] != "copy" {
+		t.Errorf("expected copy step to execute, got %v", cap.executed)
+	}
+
+	// 场景2：变量为空，应跳过
+	cap.executed = nil
+	pipelineConfig.Variables["vars.extra_files"] = ""
+	err = eng.Run(context.Background(), &pipelineConfig.Pipeline, nil, pipelineConfig, nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cap.executed) != 0 {
+		t.Errorf("expected copy step to be skipped when vars.extra_files is empty, got %v", cap.executed)
+	}
+}

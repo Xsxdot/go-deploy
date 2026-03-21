@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/Xsxdot/go-deploy/internal/core"
@@ -155,13 +156,31 @@ func expandStepArray(steps []core.Step, baseDir string) ([]core.Step, error) {
 	return expanded, nil
 }
 
-// renderTemplateVars 是一个简易的宏替换器，只替换 ${vars.key}
+// renderTemplateVars 是一个简易的宏替换器，替换 ${vars.key} 和 ${vars.key:-default} 形式
 func renderTemplateVars(step core.Step, vars map[string]string) core.Step {
 	// 将 step 序列化为 JSON 字符串，进行全局字符替换，再反序列化回来
 	// 这是一种极其简单且鲁棒的深拷贝 + 宏替换方式
 	b, _ := json.Marshal(step)
 	str := string(b)
 
+	// 先替换带默认值的 ${vars.key:-default} 形式
+	// 正则匹配 ${vars.xxx:-yyy} 形式
+	varWithDefault := regexp.MustCompile(`\$\{vars\.([a-zA-Z0-9_]+):-([^}]*)\}`)
+	str = varWithDefault.ReplaceAllStringFunc(str, func(match string) string {
+		subs := varWithDefault.FindStringSubmatch(match)
+		if len(subs) != 3 {
+			return match
+		}
+		key, defaultVal := subs[1], subs[2]
+		if v, ok := vars[key]; ok && v != "" {
+			// 变量存在且非空，使用变量值
+			return strings.ReplaceAll(v, "\"", "\\\"")
+		}
+		// 变量不存在或为空，使用默认值
+		return strings.ReplaceAll(defaultVal, "\"", "\\\"")
+	})
+
+	// 再替换普通的 ${vars.key} 形式
 	for k, v := range vars {
 		placeholder := fmt.Sprintf("${vars.%s}", k)
 		// 注意：如果 v 里面有双引号，为了 JSON 语法安全，应当做一次转义，
