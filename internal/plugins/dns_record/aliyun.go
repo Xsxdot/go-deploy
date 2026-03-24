@@ -73,6 +73,10 @@ func (p *AliyunProvider) EnsureRecords(ctx context.Context, domain, recordType s
 	used := make(map[string]bool) // 已用于更新的 recordId
 
 	for _, rec := range resp.DomainRecords.Record {
+		// 精确匹配 RR，避免 RRKeyWord 模糊匹配误删其他记录（如 tk 匹配到 tk6）
+		if rec.RR != rr {
+			continue
+		}
 		recID := rec.RecordId
 		recValue := strings.TrimSpace(rec.Value)
 		if recValue == "" {
@@ -82,28 +86,13 @@ func (p *AliyunProvider) EnsureRecords(ctx context.Context, domain, recordType s
 			used[recValue] = true
 			continue
 		}
-		// 记录存在但指向错误 IP，更新为下一个期望 IP（或删除后由下面重建，这里选择更新）
-		var targetIP string
-		for ip := range ipSet {
-			if !used[ip] {
-				targetIP = ip
-				break
-			}
+		// 记录存在但指向错误 IP，删除该记录（后续会为缺失的 IP 创建新记录）
+		delReq := alidns.CreateDeleteDomainRecordRequest()
+		delReq.Scheme = "https"
+		delReq.RecordId = recID
+		if _, err := p.client.DeleteDomainRecord(delReq); err != nil {
+			return fmt.Errorf("aliyun dns: delete record %s: %w", recID, err)
 		}
-		if targetIP == "" {
-			break
-		}
-		updateReq := alidns.CreateUpdateDomainRecordRequest()
-		updateReq.Scheme = "https"
-		updateReq.RecordId = recID
-		updateReq.RR = rr
-		updateReq.Type = recordType
-		updateReq.Value = targetIP
-		_, err := p.client.UpdateDomainRecord(updateReq)
-		if err != nil {
-			return fmt.Errorf("aliyun dns: update record %s: %w", recID, err)
-		}
-		used[targetIP] = true
 	}
 
 	// 为尚未有记录的 IP 添加新记录
@@ -147,6 +136,10 @@ func (p *AliyunProvider) DeleteRecords(ctx context.Context, domain, recordType s
 	}
 
 	for _, rec := range resp.DomainRecords.Record {
+		// 精确匹配 RR，避免误删其他记录
+		if rec.RR != rr {
+			continue
+		}
 		delReq := alidns.CreateDeleteDomainRecordRequest()
 		delReq.Scheme = "https"
 		delReq.RecordId = rec.RecordId
